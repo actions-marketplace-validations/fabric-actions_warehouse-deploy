@@ -50,6 +50,7 @@
 
 ---
 
+
 ## What it solves
 
 When a Fabric Warehouse is connected to Git, Fabric writes a SQL database project
