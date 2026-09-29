@@ -1,0 +1,151 @@
+name: Integration (DEV Fabric)
+
+# Manual only: runs the action against a real DEV Fabric warehouse.
+# All test objects live in the [wdit] schema, which is dropped at the start.
+# Required (environment "fabric-dev"):
+#   secrets: FABRIC_TENANT_ID, FABRIC_CLIENT_ID, FABRIC_CLIENT_SECRET, FABRIC_WORKSPACE_ID
+#   vars:    IT_WAREHOUSE_NAME, IT_SQL_ENDPOINT
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-fabric-dev
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    environment: fabric-dev
+    env:
+      IT_WAREHOUSE_NAME: ${{ vars.IT_WAREHOUSE_NAME }}
+      IT_SQL_ENDPOINT: ${{ vars.IT_SQL_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reset [wdit] schema
+        shell: pwsh
+        env:
+          IT_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
+          IT_CLIENT_ID: ${{ secrets.FABRIC_CLIENT_ID }}
+          IT_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+        run: ./tests/integration/Reset-IntegrationSchema.ps1
+
+      # ---------------------------------------------------------------- Scenario 1: new objects
+      - id: base
+        shell: pwsh
+        run: ./tests/integration/New-Scenario.ps1 -Scenario base
+      - id: s1
+        name: "Scenario 1: create new objects (views in wrong alphabetical order)"
+        uses: ./
+        with:
+          warehouse-name: ${{ vars.IT_WAREHOUSE_NAME }}
+          warehouse-folder: ${{ steps.base.outputs.folder }}
+          workspace-id: ${{ secrets.FABRIC_WORKSPACE_ID }}
+          tenant-id: ${{ secrets.FABRIC_TENANT_ID }}
+          client-id: ${{ secrets.FABRIC_CLIENT_ID }}
+          client-secret: ${{ secrets.FABRIC_CLIENT_SECRET }}
+      - name: "Assert scenario 1 (and 4: multi-pass)"
+        shell: pwsh
+        env:
+          TABLES_CREATED: ${{ steps.s1.outputs.tables-created }}
+          VIEWS: ${{ steps.s1.outputs.views-deployed }}
+          PASSES: ${{ steps.s1.outputs.view-passes }}
+        run: |
+          if ($env:TABLES_CREATED -ne '2') { throw "expected 2 tables created, got $env:TABLES_CREATED" }
+          if ($env:VIEWS -ne '3') { throw "expected 3 views, got $env:VIEWS" }
+          if ([int]$env:PASSES -lt 2) { throw "expected multi-pass view deployment, got $env:PASSES pass(es)" }
+
+      # ---------------------------------------------------------------- Scenario 2: idempotency
+      - id: s2
+        name: "Scenario 2: same deployment again"
+        uses: ./
+        with:
+          warehouse-name: ${{ vars.IT_WAREHOUSE_NAME }}
+          warehouse-folder: ${{ steps.base.outputs.folder }}
+          workspace-id: ${{ secrets.FABRIC_WORKSPACE_ID }}
+          tenant-id: ${{ secrets.FABRIC_TENANT_ID }}
+          client-id: ${{ secrets.FABRIC_CLIENT_ID }}
+          client-secret: ${{ secrets.FABRIC_CLIENT_SECRET }}
+      - name: Assert scenario 2
+        shell: pwsh
+        env:
+          TABLES_CREATED: ${{ steps.s2.outputs.tables-created }}
+          COLUMNS: ${{ steps.s2.outputs.columns-added }}
+          STATUS: ${{ steps.s2.outputs.deployment-status }}
+        run: |
+          if ($env:STATUS -ne 'SUCCESS' -or $env:TABLES_CREATED -ne '0' -or $env:COLUMNS -ne '0') {
+            throw "not idempotent: status=$env:STATUS tables-created=$env:TABLES_CREATED columns-added=$env:COLUMNS"
+          }
+
+      # ---------------------------------------------------------------- Scenario 3: nullable column
+      - id: addcol
+        shell: pwsh
+        run: ./tests/integration/New-Scenario.ps1 -Scenario add-column
+      - id: s3
+        name: "Scenario 3: add nullable column"
+        uses: ./
+        with:
+          warehouse-name: ${{ vars.IT_WAREHOUSE_NAME }}
+          warehouse-folder: ${{ steps.addcol.outputs.folder }}
+          workspace-id: ${{ secrets.FABRIC_WORKSPACE_ID }}
+          tenant-id: ${{ secrets.FABRIC_TENANT_ID }}
+          client-id: ${{ secrets.FABRIC_CLIENT_ID }}
+          client-secret: ${{ secrets.FABRIC_CLIENT_SECRET }}
+      - name: Assert scenario 3
+        shell: pwsh
+        env:
+          COLUMNS: ${{ steps.s3.outputs.columns-added }}
+        run: if ($env:COLUMNS -ne '1') { throw "expected 1 column added, got $env:COLUMNS" }
+
+      # ---------------------------------------------------------------- Scenario 5: unresolvable dependency
+      - id: broken
+        shell: pwsh
+        run: ./tests/integration/New-Scenario.ps1 -Scenario broken-dependency
+      - id: s5
+        name: "Scenario 5: unresolvable view dependency (expected to fail)"
+        continue-on-error: true
+        uses: ./
+        with:
+          warehouse-name: ${{ vars.IT_WAREHOUSE_NAME }}
+          warehouse-folder: ${{ steps.broken.outputs.folder }}
+          workspace-id: ${{ secrets.FABRIC_WORKSPACE_ID }}
+          tenant-id: ${{ secrets.FABRIC_TENANT_ID }}
+          client-id: ${{ secrets.FABRIC_CLIENT_ID }}
+          client-secret: ${{ secrets.FABRIC_CLIENT_SECRET }}
+      - name: Assert scenario 5
+        shell: pwsh
+        env:
+          OUTCOME: ${{ steps.s5.outcome }}
+          CATEGORY: ${{ steps.s5.outputs.failure-category }}
+        run: |
+          if ($env:OUTCOME -ne 'failure' -or $env:CATEGORY -ne 'VIEW_DEPLOYMENT_FAILED') {
+            throw "expected VIEW_DEPLOYMENT_FAILED, got outcome=$env:OUTCOME category=$env:CATEGORY"
+          }
+
+      # ---------------------------------------------------------------- Scenario 6: NOT NULL column
+      - id: notnull
+        shell: pwsh
+        run: ./tests/integration/New-Scenario.ps1 -Scenario not-null
+      - id: s6
+        name: "Scenario 6: add NOT NULL column (expected to fail)"
+        continue-on-error: true
+        uses: ./
+        with:
+          warehouse-name: ${{ vars.IT_WAREHOUSE_NAME }}
+          warehouse-folder: ${{ steps.notnull.outputs.folder }}
+          workspace-id: ${{ secrets.FABRIC_WORKSPACE_ID }}
+          tenant-id: ${{ secrets.FABRIC_TENANT_ID }}
+          client-id: ${{ secrets.FABRIC_CLIENT_ID }}
+          client-secret: ${{ secrets.FABRIC_CLIENT_SECRET }}
+      - name: Assert scenario 6
+        shell: pwsh
+        env:
+          OUTCOME: ${{ steps.s6.outcome }}
+          CATEGORY: ${{ steps.s6.outputs.failure-category }}
+        run: |
+          if ($env:OUTCOME -ne 'failure' -or $env:CATEGORY -ne 'UNSAFE_SCHEMA_CHANGE') {
+            throw "expected UNSAFE_SCHEMA_CHANGE, got outcome=$env:OUTCOME category=$env:CATEGORY"
+          }

@@ -1,0 +1,21 @@
+# Test output
+test-results.xml
+testResults.xml
+coverage.xml
+
+# Integration scenarios composed at runtime
+_it/
+
+# Local tooling
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Never commit credentials
+.env
+*.env
+*.pfx
+*.pem
+

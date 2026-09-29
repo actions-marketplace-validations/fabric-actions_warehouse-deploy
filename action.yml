@@ -1,0 +1,96 @@
+name: "Fabric Warehouse Deploy"
+description: "Dependency-aware CI/CD deployment for Microsoft Fabric Warehouse database projects."
+author: "fabric-actions"
+
+branding:
+  icon: "database"
+  color: "blue"
+
+inputs:
+  warehouse-name:
+    description: "Display name of the target Fabric Warehouse."
+    required: true
+  warehouse-folder:
+    description: "Path (relative to the repository root) of the Fabric Git-generated warehouse folder, e.g. MyWarehouse.Warehouse."
+    required: true
+  workspace-id:
+    description: "Fabric workspace ID (GUID) containing the warehouse."
+    required: true
+  tenant-id:
+    description: "Microsoft Entra tenant ID (GUID)."
+    required: true
+  client-id:
+    description: "Service Principal application (client) ID (GUID)."
+    required: true
+  client-secret:
+    description: "Service Principal client secret. Always pass from a GitHub secret."
+    required: true
+  fail-on-unclassified-sql:
+    description: "Fail the deployment when SQL files cannot be classified. When false they are reported as warnings and skipped."
+    required: false
+    default: "false"
+  max-view-passes:
+    description: "Upper bound on view dependency-resolution passes. 0 = automatic (number of views)."
+    required: false
+    default: "0"
+  verbose:
+    description: "Emit debug logging (never includes secrets or tokens)."
+    required: false
+    default: "false"
+  sqlcmd-version:
+    description: "Version of go-sqlcmd (github.com/microsoft/go-sqlcmd) to download and use."
+    required: false
+    default: "1.8.0"
+
+outputs:
+  deployment-status:
+    description: "SUCCESS or FAILED."
+    value: ${{ steps.deploy.outputs.deployment-status }}
+  failure-category:
+    description: "Error category when deployment-status is FAILED, otherwise empty."
+    value: ${{ steps.deploy.outputs.failure-category }}
+  warehouse-id:
+    description: "ID of the resolved warehouse."
+    value: ${{ steps.deploy.outputs.warehouse-id }}
+  warehouse-name:
+    description: "Display name of the resolved warehouse."
+    value: ${{ steps.deploy.outputs.warehouse-name }}
+  tables-created:
+    description: "Number of tables created."
+    value: ${{ steps.deploy.outputs.tables-created }}
+  tables-existing:
+    description: "Number of source tables that already existed in the warehouse."
+    value: ${{ steps.deploy.outputs.tables-existing }}
+  columns-added:
+    description: "Number of nullable columns added to existing tables."
+    value: ${{ steps.deploy.outputs.columns-added }}
+  views-deployed:
+    description: "Number of views deployed (CREATE OR ALTER)."
+    value: ${{ steps.deploy.outputs.views-deployed }}
+  view-passes:
+    description: "Number of passes needed to resolve view dependencies."
+    value: ${{ steps.deploy.outputs.view-passes }}
+  unclassified-files:
+    description: "Number of SQL files that were not classified (and not executed)."
+    value: ${{ steps.deploy.outputs.unclassified-files }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Deploy Fabric Warehouse
+      id: deploy
+      shell: pwsh
+      # Inputs are passed only through environment variables and never
+      # interpolated into the script text, which prevents script injection.
+      env:
+        INPUT_WAREHOUSE_NAME: ${{ inputs.warehouse-name }}
+        INPUT_WAREHOUSE_FOLDER: ${{ inputs.warehouse-folder }}
+        INPUT_WORKSPACE_ID: ${{ inputs.workspace-id }}
+        INPUT_TENANT_ID: ${{ inputs.tenant-id }}
+        INPUT_CLIENT_ID: ${{ inputs.client-id }}
+        INPUT_CLIENT_SECRET: ${{ inputs.client-secret }}
+        INPUT_FAIL_ON_UNCLASSIFIED_SQL: ${{ inputs.fail-on-unclassified-sql }}
+        INPUT_MAX_VIEW_PASSES: ${{ inputs.max-view-passes }}
+        INPUT_VERBOSE: ${{ inputs.verbose }}
+        INPUT_SQLCMD_VERSION: ${{ inputs.sqlcmd-version }}
+      run: '& (Join-Path $env:GITHUB_ACTION_PATH "scripts/deploy-warehouse.ps1")'

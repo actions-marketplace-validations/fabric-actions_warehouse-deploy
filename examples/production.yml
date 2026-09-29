@@ -1,0 +1,74 @@
+# Promotion pipeline: TEST deploys automatically, PROD waits for an approval
+# configured on the "production" GitHub environment. Each environment holds its
+# own FABRIC_* secrets and WAREHOUSE_* variables.
+name: Deploy Fabric Warehouse (promotion)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "SalesWarehouse.Warehouse/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two deployments against the same warehouse at once.
+concurrency:
+  group: fabric-warehouse-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-test:
+    runs-on: ubuntu-latest
+    environment: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to TEST
+        id: fabric
+        uses: fabric-actions/warehouse-deploy@v0.1.0
+        with:
+          warehouse-name: ${{ vars.WAREHOUSE_NAME }}
+          warehouse-folder: ${{ vars.WAREHOUSE_FOLDER }}
+          workspace-id: ${{ secrets.FABRIC_WORKSPACE_ID }}
+          tenant-id: ${{ secrets.FABRIC_TENANT_ID }}
+          client-id: ${{ secrets.FABRIC_CLIENT_ID }}
+          client-secret: ${{ secrets.FABRIC_CLIENT_SECRET }}
+          fail-on-unclassified-sql: "true"
+
+      - name: Record result
+        if: always()
+        shell: bash
+        env:
+          STATUS: ${{ steps.fabric.outputs.deployment-status }}
+          CATEGORY: ${{ steps.fabric.outputs.failure-category }}
+          CREATED: ${{ steps.fabric.outputs.tables-created }}
+          COLUMNS: ${{ steps.fabric.outputs.columns-added }}
+          VIEWS: ${{ steps.fabric.outputs.views-deployed }}
+          PASSES: ${{ steps.fabric.outputs.view-passes }}
+        run: |
+          {
+            echo "### TEST warehouse deployment: ${STATUS} ${CATEGORY}"
+            echo "| Tables created | Columns added | Views deployed | View passes |"
+            echo "|---|---|---|---|"
+            echo "| ${CREATED} | ${COLUMNS} | ${VIEWS} | ${PASSES} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-prod:
+    needs: deploy-test
+    runs-on: ubuntu-latest
+    environment: production   # configure required reviewers on this environment
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to PROD
+        uses: fabric-actions/warehouse-deploy@v0.1.0
+        with:
+          warehouse-name: ${{ vars.WAREHOUSE_NAME }}
+          warehouse-folder: ${{ vars.WAREHOUSE_FOLDER }}
+          workspace-id: ${{ secrets.FABRIC_WORKSPACE_ID }}
+          tenant-id: ${{ secrets.FABRIC_TENANT_ID }}
+          client-id: ${{ secrets.FABRIC_CLIENT_ID }}
+          client-secret: ${{ secrets.FABRIC_CLIENT_SECRET }}
+          fail-on-unclassified-sql: "true"

@@ -1,0 +1,27 @@
+# Minimal deployment on every push to main.
+# Copy to .github/workflows/deploy-warehouse.yml in the repository that Fabric Git syncs to.
+name: Deploy Fabric Warehouse
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy Fabric Warehouse
+        uses: fabric-actions/warehouse-deploy@v0.1.0
+        with:
+          warehouse-name: ${{ vars.WAREHOUSE_NAME }}
+          warehouse-folder: ${{ vars.WAREHOUSE_FOLDER }}   # e.g. SalesWarehouse.Warehouse
+          workspace-id: ${{ secrets.FABRIC_WORKSPACE_ID }}
+          tenant-id: ${{ secrets.FABRIC_TENANT_ID }}
+          client-id: ${{ secrets.FABRIC_CLIENT_ID }}
+          client-secret: ${{ secrets.FABRIC_CLIENT_SECRET }}
